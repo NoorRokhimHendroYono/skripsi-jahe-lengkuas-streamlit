@@ -17,29 +17,27 @@ st.set_page_config(
 )
 
 st.title("🌿 Klasifikasi Jahe dan Lengkuas")
-st.caption("Deep Learning Image Classification — Stage 1: Model Loading")
+st.caption(
+    "Deep Learning Image Classification — Stage 1: Model Loading"
+)
 
 
 # ------------------------------------------------------------
 # PATH CONFIGURATION
 # ------------------------------------------------------------
 
-COLAB_ROOT = Path("/content/drive/MyDrive/SKRIPSI_AI")
+# Root project:
+# skripsi-jahe-lengkuas-streamlit/
+ROOT_DIR = Path(__file__).resolve().parent
 
-# Untuk testing di Google Colab.
-# Untuk deployment nanti, kita akan ubah ke struktur project
-# relatif agar dapat dijalankan dari GitHub/hosting.
-if COLAB_ROOT.exists():
-    ROOT_DIR = COLAB_ROOT
-else:
-    ROOT_DIR = Path(__file__).resolve().parent.parent
-
-MODEL_DIR = ROOT_DIR / "Saved_Model"
+# Folder model:
+# skripsi-jahe-lengkuas-streamlit/models/
+MODEL_DIR = ROOT_DIR / "models"
 
 MODEL_PATHS = {
-    "Baseline CNN": MODEL_DIR / "Baseline_CNN" / "baseline_cnn_final.keras",
-    "MobileNetV2": MODEL_DIR / "MobileNetV2" / "mobilenetv2_final.keras",
-    "EfficientNetB0": MODEL_DIR / "EfficientNetB0" / "efficientnetb0_final.keras",
+    "Baseline CNN": MODEL_DIR / "baseline_cnn_final.keras",
+    "MobileNetV2": MODEL_DIR / "mobilenetv2_final.keras",
+    "EfficientNetB0": MODEL_DIR / "efficientnetb0_final.keras",
 }
 
 
@@ -64,11 +62,13 @@ with env_col2:
     )
 
 if gpus:
-    st.success(f"GPU terdeteksi: {gpus}")
+    st.success(
+        f"GPU terdeteksi: {gpus}"
+    )
 else:
     st.info(
-        "GPU tidak terdeteksi. Untuk tahap Streamlit prediction, "
-        "CPU masih dapat digunakan; GPU akan dipertimbangkan saat deployment."
+        "GPU tidak terdeteksi. "
+        "Untuk tahap Streamlit prediction, CPU masih dapat digunakan."
     )
 
 
@@ -81,18 +81,23 @@ st.subheader("2. Model File Check")
 path_rows = []
 
 for model_name, model_path in MODEL_PATHS.items():
+
     path_rows.append(
         {
             "Model": model_name,
             "File": model_path.name,
-            "Status": "FOUND" if model_path.exists() else "NOT FOUND",
+            "Status": (
+                "FOUND"
+                if model_path.exists()
+                else "NOT FOUND"
+            ),
             "Path": str(model_path),
         }
     )
 
 st.dataframe(
     path_rows,
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )
 
@@ -104,13 +109,18 @@ missing_models = [
 ]
 
 if missing_models:
+
     st.error(
-        "Model belum lengkap. File yang tidak ditemukan: "
+        "Model belum lengkap. "
+        "File yang tidak ditemukan: "
         + ", ".join(missing_models)
     )
+
     st.stop()
 
-st.success("Semua 3 final model ditemukan.")
+st.success(
+    "Semua 3 final model ditemukan."
+)
 
 
 # ------------------------------------------------------------
@@ -119,20 +129,28 @@ st.success("Semua 3 final model ditemukan.")
 
 st.subheader("3. Load Final Models")
 
+
 @st.cache_resource
 def load_models():
+
     loaded = {}
 
     for model_name, model_path in MODEL_PATHS.items():
-        loaded[model_name] = tf.keras.models.load_model(
-            model_path,
-            compile=False,
+
+        loaded[model_name] = (
+            tf.keras.models.load_model(
+                model_path,
+                compile=False,
+            )
         )
 
     return loaded
 
 
-with st.spinner("Memuat 3 final model..."):
+with st.spinner(
+    "Memuat 3 final model..."
+):
+
     models = load_models()
 
 
@@ -143,21 +161,32 @@ with st.spinner("Memuat 3 final model..."):
 model_rows = []
 
 for model_name, model in models.items():
-    input_shape = tuple(model.input_shape)
-    output_shape = tuple(model.output_shape)
+
+    input_shape = tuple(
+        model.input_shape
+    )
+
+    output_shape = tuple(
+        model.output_shape
+    )
 
     model_rows.append(
         {
             "Model": model_name,
-            "Input Shape": str(input_shape),
-            "Output Shape": str(output_shape),
+            "Input Shape": str(
+                input_shape
+            ),
+            "Output Shape": str(
+                output_shape
+            ),
             "Status": "PASS",
         }
     )
 
+
 st.dataframe(
     model_rows,
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )
 
@@ -168,20 +197,30 @@ st.dataframe(
 
 st.subheader("4. Final Check")
 
-all_loaded = len(models) == 3
+all_loaded = (
+    len(models) == 3
+)
 
 if all_loaded:
+
     st.success(
         "STREAMLIT STAGE 1 PASS — "
-        "Baseline CNN, MobileNetV2, dan EfficientNetB0 berhasil dimuat."
+        "Baseline CNN, MobileNetV2, dan EfficientNetB0 "
+        "berhasil dimuat."
     )
+
 else:
-    st.error("STREAMLIT STAGE 1 FAIL.")
+
+    st.error(
+        "STREAMLIT STAGE 1 FAIL."
+    )
+
 
 st.divider()
 
 st.info(
     "Tahap berikutnya: Prediction Engine. "
-    "Kita akan menambahkan upload citra, preprocessing 224×224 RGB, "
-    "prediksi ketiga model, dan confidence."
+    "Kita akan menambahkan upload citra, "
+    "preprocessing 224×224 RGB, prediksi ketiga model, "
+    "dan confidence."
 )
