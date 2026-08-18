@@ -1,17 +1,19 @@
 import os
+import time
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import streamlit as st
 import tensorflow as tf
+import cv2
+import pandas as pd
 from PIL import Image
 
 
 # ============================================================
-# STREAMLIT — STAGE 2
-# Prediction Engine
-# Upload Image + Preprocessing + 3 Model Prediction
+# STREAMLIT
+# STAGE 3
+# Upload + Camera + Prediction + Grad-CAM
 # ============================================================
 
 st.set_page_config(
@@ -20,21 +22,16 @@ st.set_page_config(
     layout="wide",
 )
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 st.title("🌿 Klasifikasi Jahe dan Lengkuas")
 st.caption(
     "Deep Learning Image Classification — "
-    "Stage 2: Prediction Engine"
+    "Stage 3: Prediction + Grad-CAM"
 )
 
 
-# ------------------------------------------------------------
-# CLASS MAPPING
-# ------------------------------------------------------------
+# ============================================================
+# CONSTANT
+# ============================================================
 
 CLASS_NAMES = [
     "Jahe",
@@ -44,18 +41,13 @@ CLASS_NAMES = [
 IMAGE_SIZE = (224, 224)
 
 
-# ------------------------------------------------------------
-# PROJECT ROOT
-# ------------------------------------------------------------
+# ============================================================
+# PATH CONFIGURATION
+# ============================================================
 
 ROOT_DIR = Path(__file__).resolve().parent
 
 MODEL_DIR = ROOT_DIR / "models"
-
-
-# ------------------------------------------------------------
-# MODEL PATHS
-# ------------------------------------------------------------
 
 MODEL_PATHS = {
     "Baseline CNN":
@@ -70,7 +62,32 @@ MODEL_PATHS = {
 
 
 # ============================================================
-# STAGE 1 — ENVIRONMENT CHECK
+# FINAL MODEL METRICS / GRAD-CAM CONFIG
+# ============================================================
+
+# CSV hasil evaluasi dapat ditempatkan di folder berikut agar
+# accuracy final ikut tampil di Streamlit.
+METRICS_DIR_CANDIDATES = [
+    ROOT_DIR / "Results" / "Model_Evaluation",
+    ROOT_DIR / "results" / "Model_Evaluation",
+    ROOT_DIR / "Model_Evaluation",
+]
+
+METRICS_FILE_CANDIDATES = [
+    "MASTER_RESULTS_FINAL.csv",
+    "master_results_final.csv",
+]
+
+# Target layer dikunci mengikuti hasil audit Notebook 08_GradCAM_Audit.
+GRADCAM_TARGET_LAYERS = {
+    "Baseline CNN": "conv2d_2",
+    "MobileNetV2": "Conv_1",
+    "EfficientNetB0": "top_conv",
+}
+
+
+# ============================================================
+# ENVIRONMENT CHECK
 # ============================================================
 
 st.subheader("1. Environment Check")
@@ -91,17 +108,135 @@ with env_col2:
 
 if gpus:
     st.success(
-        f"GPU terdeteksi: {len(gpus)} device."
+        f"GPU terdeteksi: {gpus}"
     )
 else:
     st.info(
         "GPU tidak terdeteksi. "
-        "Prediction tetap dapat dijalankan menggunakan CPU."
+        "Prediction dan Grad-CAM tetap dapat dijalankan "
+        "menggunakan CPU."
     )
 
 
 # ============================================================
-# STAGE 1 — MODEL FILE CHECK
+# MODEL METRICS
+# ============================================================
+
+def normalize_model_name(value):
+    value = str(value).strip().lower()
+
+    aliases = {
+        "baseline cnn": "Baseline CNN",
+        "baseline_cnn": "Baseline CNN",
+        "cnn": "Baseline CNN",
+        "mobilenetv2": "MobileNetV2",
+        "mobilenetv2_1.00_224": "MobileNetV2",
+        "efficientnetb0": "EfficientNetB0",
+        "efficientnet b0": "EfficientNetB0",
+    }
+
+    return aliases.get(value, str(value).strip())
+
+
+def find_metrics_csv():
+    for directory in METRICS_DIR_CANDIDATES:
+        for filename in METRICS_FILE_CANDIDATES:
+            candidate = directory / filename
+
+            if candidate.exists():
+                return candidate
+
+    return None
+
+
+@st.cache_data
+def load_accuracy_metrics():
+    metrics_path = find_metrics_csv()
+
+    if metrics_path is None:
+        return {}, None, (
+            "MASTER_RESULTS_FINAL.csv tidak ditemukan. "
+            "Accuracy final tidak dapat diisi otomatis."
+        )
+
+    try:
+        df = pd.read_csv(metrics_path)
+
+        # Cari kolom nama model.
+        model_col = None
+        for column in df.columns:
+            normalized = str(column).strip().lower()
+
+            if normalized in {
+                "model",
+                "model_name",
+                "modelname",
+            }:
+                model_col = column
+                break
+
+        # Cari kolom accuracy.
+        accuracy_col = None
+        for column in df.columns:
+            normalized = str(column).strip().lower()
+
+            if normalized in {
+                "accuracy",
+                "val_accuracy",
+                "test_accuracy",
+                "mean_accuracy",
+                "accuracy_mean",
+            }:
+                accuracy_col = column
+                break
+
+        if model_col is None or accuracy_col is None:
+            return {}, metrics_path, (
+                "Kolom model/accuracy pada "
+                f"{metrics_path.name} tidak dikenali."
+            )
+
+        accuracy_metrics = {}
+
+        for _, row in df.iterrows():
+            model_name = normalize_model_name(
+                row[model_col]
+            )
+
+            if model_name not in MODEL_PATHS:
+                continue
+
+            try:
+                value = float(row[accuracy_col])
+
+                # Jika accuracy tersimpan sebagai 0–1,
+                # ubah ke persen hanya saat ditampilkan.
+                accuracy_metrics[model_name] = value
+
+            except (TypeError, ValueError):
+                continue
+
+        if not accuracy_metrics:
+            return {}, metrics_path, (
+                "Tidak ada accuracy final untuk 3 model "
+                "yang berhasil dibaca."
+            )
+
+        return accuracy_metrics, metrics_path, None
+
+    except Exception as error:
+        return {}, metrics_path, (
+            f"Gagal membaca metrics CSV: {error}"
+        )
+
+
+accuracy_metrics, accuracy_metrics_path, accuracy_metrics_warning = (
+    load_accuracy_metrics()
+)
+
+
+# ============================================================
+# MODEL FILE CHECK
 # ============================================================
 
 st.subheader("2. Model File Check")
@@ -114,11 +249,10 @@ for model_name, model_path in MODEL_PATHS.items():
         {
             "Model": model_name,
             "File": model_path.name,
-            "Status": (
+            "Status":
                 "FOUND"
                 if model_path.exists()
-                else "NOT FOUND"
-            ),
+                else "NOT FOUND",
             "Path": str(model_path),
         }
     )
@@ -132,7 +266,8 @@ st.dataframe(
 
 missing_models = [
     model_name
-    for model_name, model_path in MODEL_PATHS.items()
+    for model_name, model_path
+    in MODEL_PATHS.items()
     if not model_path.exists()
 ]
 
@@ -152,7 +287,7 @@ st.success(
 
 
 # ============================================================
-# STAGE 1 — LOAD MODELS
+# LOAD MODELS
 # ============================================================
 
 st.subheader("3. Load Final Models")
@@ -161,45 +296,77 @@ st.subheader("3. Load Final Models")
 @st.cache_resource
 def load_models():
 
-    loaded_models = {}
+    loaded = {}
 
     for model_name, model_path in MODEL_PATHS.items():
 
-        loaded_models[model_name] = (
+        loaded[model_name] = (
             tf.keras.models.load_model(
                 model_path,
                 compile=False,
             )
         )
 
-    return loaded_models
+    return loaded
 
 
 with st.spinner(
-    "Memuat Baseline CNN, MobileNetV2, "
-    "dan EfficientNetB0..."
+    "Memuat 3 final model..."
 ):
 
     models = load_models()
 
 
 # ============================================================
-# STAGE 1 — MODEL VALIDATION
+# MODEL CHECK
 # ============================================================
 
 model_rows = []
 
 for model_name, model in models.items():
 
+    input_shape = tuple(
+        model.input_shape
+    )
+
+    output_shape = tuple(
+        model.output_shape
+    )
+
+    model_size_bytes = MODEL_PATHS[
+        model_name
+    ].stat().st_size
+
+    model_size_mb = (
+        model_size_bytes / (1024 ** 2)
+    )
+
+    accuracy_value = accuracy_metrics.get(
+        model_name
+    )
+
+    accuracy_display = (
+        f"{accuracy_value * 100:.2f}%"
+        if accuracy_value is not None
+        and accuracy_value <= 1
+        else (
+            f"{accuracy_value:.2f}%"
+            if accuracy_value is not None
+            else "N/A"
+        )
+    )
+
     model_rows.append(
         {
             "Model": model_name,
             "Input Shape": str(
-                tuple(model.input_shape)
+                input_shape
             ),
             "Output Shape": str(
-                tuple(model.output_shape)
+                output_shape
             ),
+            "Accuracy": accuracy_display,
+            "Model Size (MB)": f"{model_size_mb:.2f}",
             "Status": "PASS",
         }
     )
@@ -211,342 +378,920 @@ st.dataframe(
     hide_index=True,
 )
 
-
-# ============================================================
-# STAGE 1 FINAL CHECK
-# ============================================================
-
-all_loaded = len(models) == 3
-
-if not all_loaded:
-
-    st.error(
-        "STAGE 1 FAIL — "
-        "Tidak semua model berhasil dimuat."
-    )
-
-    st.stop()
-
-
 st.success(
     "STAGE 1 PASS — "
     "Ketiga final model berhasil dimuat."
 )
 
-
-# ============================================================
-# STAGE 2 — IMAGE UPLOAD
-# ============================================================
-
-st.divider()
-
-st.header("4. Upload Citra")
-
-st.write(
-    "Upload satu citra jahe atau lengkuas "
-    "untuk dilakukan klasifikasi oleh ketiga model."
-)
-
-
-uploaded_file = st.file_uploader(
-    "Pilih gambar",
-    type=[
-        "jpg",
-        "jpeg",
-        "png",
-        "webp",
-    ],
-)
+if accuracy_metrics_warning:
+    st.warning(
+        accuracy_metrics_warning
+    )
+else:
+    st.caption(
+        "Accuracy final dibaca dari: "
+        f"{accuracy_metrics_path}"
+    )
 
 
 # ============================================================
-# PREPROCESSING FUNCTION
+# PREPROCESSING
 # ============================================================
 
 def preprocess_image(image):
 
-    # Pastikan RGB
     image = image.convert("RGB")
 
-    # Resize sesuai input model
-    image = image.resize(
-        IMAGE_SIZE
-    )
+    image_array = np.array(image)
 
-    # Convert ke NumPy
-    image_array = np.asarray(
-        image,
-        dtype=np.float32,
-    )
-
-    # Normalisasi 0–1
-    image_array = image_array / 255.0
-
-    # Tambahkan batch dimension
-    image_array = np.expand_dims(
+    resized = cv2.resize(
         image_array,
+        IMAGE_SIZE,
+        interpolation=cv2.INTER_AREA,
+    )
+
+    normalized = (
+        resized.astype(np.float32) / 255.0
+    )
+
+    batch = np.expand_dims(
+        normalized,
         axis=0,
     )
 
-    return image_array
+    return (
+        image_array,
+        resized,
+        batch,
+    )
 
 
 # ============================================================
-# PREDICTION FUNCTION
+# PREDICTION
 # ============================================================
 
-def predict_model(model, input_array):
+def predict_models(
+    models,
+    image_batch,
+):
 
-    prediction = model.predict(
-        input_array,
-        verbose=0,
+    results = {}
+
+    for model_name, model in models.items():
+
+        # Waktu yang diukur hanya proses inference/predict,
+        # tidak termasuk preprocessing dan Grad-CAM.
+        start_time = time.perf_counter()
+
+        prediction = model.predict(
+            image_batch,
+            verbose=0,
+        )
+
+        end_time = time.perf_counter()
+
+        inference_time_ms = (
+            end_time - start_time
+        ) * 1000.0
+
+        prediction = np.asarray(
+            prediction
+        )[0]
+
+        predicted_index = int(
+            np.argmax(prediction)
+        )
+
+        predicted_class = (
+            CLASS_NAMES[
+                predicted_index
+            ]
+        )
+
+        confidence = float(
+            prediction[
+                predicted_index
+            ]
+        )
+
+        model_size_bytes = MODEL_PATHS[
+            model_name
+        ].stat().st_size
+
+        model_size_mb = (
+            model_size_bytes / (1024 ** 2)
+        )
+
+        accuracy_value = accuracy_metrics.get(
+            model_name
+        )
+
+        results[model_name] = {
+            "prediction":
+                predicted_class,
+            "confidence":
+                confidence,
+            "probabilities":
+                prediction,
+            "class_index":
+                predicted_index,
+            "inference_time_ms":
+                inference_time_ms,
+            "model_size_mb":
+                model_size_mb,
+            "accuracy":
+                accuracy_value,
+        }
+
+    return results
+
+
+# ============================================================
+# FIND LAST CONVOLUTIONAL LAYER
+# ============================================================
+
+def find_last_conv_layer(model):
+
+    # First try direct layers
+    for layer in reversed(model.layers):
+
+        try:
+
+            output_shape = layer.output.shape
+
+            if (
+                len(output_shape) == 4
+                and
+                isinstance(
+                    layer,
+                    (
+                        tf.keras.layers.Conv2D,
+                        tf.keras.layers.SeparableConv2D,
+                        tf.keras.layers.DepthwiseConv2D,
+                    ),
+                )
+            ):
+
+                return layer
+
+        except Exception:
+            continue
+
+
+    # Search nested models
+    for layer in reversed(model.layers):
+
+        if isinstance(
+            layer,
+            tf.keras.Model,
+        ):
+
+            try:
+
+                nested_layer = (
+                    find_last_conv_layer(
+                        layer
+                    )
+                )
+
+                if nested_layer is not None:
+
+                    return nested_layer
+
+            except Exception:
+                pass
+
+
+    return None
+
+
+# ============================================================
+# GRAD-CAM
+# ============================================================
+
+def make_gradcam_heatmap(
+    image_batch,
+    model,
+    predicted_index,
+):
+
+    expected_layer_name = GRADCAM_TARGET_LAYERS.get(
+        next(
+            (
+                name
+                for name, path in MODEL_PATHS.items()
+                if models.get(name) is model
+            ),
+            None,
+        )
     )
 
-    probabilities = prediction[0]
+    last_conv_layer = None
 
-    predicted_index = int(
-        np.argmax(probabilities)
+    # Gunakan target layer yang sudah dikunci pada
+    # Notebook 08_GradCAM_Audit.
+    if expected_layer_name:
+        try:
+            last_conv_layer = model.get_layer(
+                expected_layer_name
+            )
+        except Exception:
+            last_conv_layer = None
+
+    # Fallback ke pencarian layer lama jika target
+    # terkunci tidak ditemukan pada file model.
+    if last_conv_layer is None:
+        last_conv_layer = (
+            find_last_conv_layer(
+                model
+            )
+        )
+
+    if last_conv_layer is None:
+
+        raise ValueError(
+            "Layer convolutional terakhir "
+            "tidak ditemukan pada model."
+        )
+
+
+    try:
+
+        grad_model = tf.keras.models.Model(
+            inputs=model.inputs,
+            outputs=[
+                last_conv_layer.output,
+                model.output,
+            ],
+        )
+
+    except Exception as error:
+
+        raise ValueError(
+            "Grad-CAM tidak dapat membangun "
+            "activation model dari layer "
+            "konvolusi terakhir."
+        ) from error
+
+
+    with tf.GradientTape() as tape:
+
+        conv_outputs, predictions = (
+            grad_model(image_batch)
+        )
+
+        class_channel = predictions[
+            :, predicted_index
+        ]
+
+
+    gradients = tape.gradient(
+        class_channel,
+        conv_outputs,
     )
 
-    predicted_class = CLASS_NAMES[
-        predicted_index
-    ]
+    if gradients is None:
 
-    confidence = float(
-        probabilities[predicted_index]
+        raise ValueError(
+            "Gradient tidak tersedia "
+            "untuk Grad-CAM."
+        )
+
+
+    pooled_gradients = tf.reduce_mean(
+        gradients,
+        axis=(0, 1, 2),
     )
+
+
+    conv_outputs = conv_outputs[0]
+
+    heatmap = tf.reduce_sum(
+        conv_outputs
+        * pooled_gradients,
+        axis=-1,
+    )
+
+
+    heatmap = tf.maximum(
+        heatmap,
+        0,
+    )
+
+
+    max_value = tf.reduce_max(
+        heatmap
+    )
+
+
+    heatmap = tf.where(
+        max_value > 0,
+        heatmap / max_value,
+        tf.zeros_like(heatmap),
+    )
+
 
     return (
-        predicted_class,
-        confidence,
-        probabilities,
+        heatmap.numpy(),
+        last_conv_layer.name,
     )
 
 
 # ============================================================
-# PREDICTION ENGINE
+# CREATE GRAD-CAM OVERLAY
 # ============================================================
 
-if uploaded_file is not None:
+def create_gradcam_overlay(
+    original_image,
+    heatmap,
+):
 
-    st.divider()
+    original = cv2.cvtColor(
+        original_image,
+        cv2.COLOR_RGB2BGR,
+    )
 
-    st.header("5. Prediction Engine")
+    height, width = (
+        original.shape[:2]
+    )
 
-    # --------------------------------------------------------
-    # LOAD IMAGE
-    # --------------------------------------------------------
+    heatmap_resized = cv2.resize(
+        heatmap,
+        (width, height),
+    )
+
+
+    heatmap_uint8 = np.uint8(
+        255 * heatmap_resized
+    )
+
+
+    heatmap_color = cv2.applyColorMap(
+        heatmap_uint8,
+        cv2.COLORMAP_JET,
+    )
+
+
+    overlay = cv2.addWeighted(
+        original,
+        0.55,
+        heatmap_color,
+        0.45,
+        0,
+    )
+
+
+    overlay = cv2.cvtColor(
+        overlay,
+        cv2.COLOR_BGR2RGB,
+    )
+
+    return overlay
+
+
+# ============================================================
+# INPUT IMAGE
+# ============================================================
+
+st.divider()
+
+st.subheader("4. Input Citra")
+
+st.write(
+    "Pilih salah satu metode input:"
+)
+
+input_tab1, input_tab2 = st.tabs(
+    [
+        "📁 Upload Gambar",
+        "📷 Open Camera",
+    ]
+)
+
+
+uploaded_file = None
+camera_file = None
+
+
+# ------------------------------------------------------------
+# UPLOAD
+# ------------------------------------------------------------
+
+with input_tab1:
+
+    uploaded_file = st.file_uploader(
+        "Upload citra jahe atau lengkuas",
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
+        help=(
+            "Upload satu gambar untuk "
+            "diklasifikasikan."
+        ),
+    )
+
+
+# ------------------------------------------------------------
+# CAMERA
+# ------------------------------------------------------------
+
+with input_tab2:
+
+    camera_file = st.camera_input(
+        "Ambil foto menggunakan kamera"
+    )
+
+
+# ============================================================
+# SELECT INPUT
+# ============================================================
+
+image_source = (
+    camera_file
+    if camera_file is not None
+    else uploaded_file
+)
+
+
+if image_source is None:
+
+    st.info(
+        "Silakan upload gambar atau "
+        "ambil foto menggunakan kamera "
+        "untuk memulai prediction."
+    )
+
+    st.stop()
+
+
+# ============================================================
+# READ IMAGE
+# ============================================================
+
+try:
 
     image = Image.open(
-        uploaded_file
+        image_source
+    ).convert("RGB")
+
+except Exception as error:
+
+    st.error(
+        f"Gagal membaca gambar: {error}"
     )
 
-    image = image.convert("RGB")
+    st.stop()
 
-    # --------------------------------------------------------
-    # DISPLAY ORIGINAL IMAGE
-    # --------------------------------------------------------
 
-    image_col1, image_col2 = st.columns(
-        [1, 1]
+# ============================================================
+# PREPROCESS
+# ============================================================
+
+(
+    original_image,
+    resized_image,
+    image_batch,
+) = preprocess_image(
+    image
+)
+
+
+# ============================================================
+# DISPLAY INPUT
+# ============================================================
+
+st.subheader(
+    "5. Preprocessing"
+)
+
+input_col1, input_col2 = (
+    st.columns(2)
+)
+
+
+with input_col1:
+
+    st.markdown(
+        "### Citra Input"
     )
 
-    with image_col1:
-
-        st.subheader(
-            "Citra Input"
-        )
-
-        st.image(
-            image,
-            caption=(
-                f"{uploaded_file.name} "
-                f"— {image.size[0]}×{image.size[1]} px"
-            ),
-            width="stretch",
-        )
-
-    # --------------------------------------------------------
-    # PREPROCESS
-    # --------------------------------------------------------
-
-    input_array = preprocess_image(
-        image
-    )
-
-    with image_col2:
-
-        st.subheader(
-            "Preprocessing"
-        )
-
-        st.write(
-            "**Color:** RGB"
-        )
-
-        st.write(
-            "**Ukuran input:** "
-            "224 × 224 × 3"
-        )
-
-        st.write(
-            "**Normalisasi:** "
-            "0–1"
-        )
-
-        st.write(
-            "**Batch shape:** "
-            f"{input_array.shape}"
-        )
-
-
-    # ========================================================
-    # PREDICT ALL MODELS
-    # ========================================================
-
-    results = []
-
-    with st.spinner(
-        "Menjalankan prediksi "
-        "ketiga model..."
-    ):
-
-        for model_name, model in models.items():
-
-            (
-                predicted_class,
-                confidence,
-                probabilities,
-            ) = predict_model(
-                model,
-                input_array,
-            )
-
-            results.append(
-                {
-                    "Model": model_name,
-                    "Prediksi": predicted_class,
-                    "Confidence": confidence,
-                }
-            )
-
-
-    results_df = pd.DataFrame(
-        results
-    )
-
-
-    # ========================================================
-    # DISPLAY RESULTS
-    # ========================================================
-
-    st.subheader(
-        "6. Hasil Prediksi"
-    )
-
-    display_df = results_df.copy()
-
-    display_df["Confidence"] = (
-        display_df["Confidence"] * 100
-    ).map(
-        lambda x: f"{x:.2f}%"
-    )
-
-
-    st.dataframe(
-        display_df,
+    st.image(
+        original_image,
         width="stretch",
-        hide_index=True,
     )
 
 
-    # ========================================================
-    # INDIVIDUAL MODEL RESULT
-    # ========================================================
+with input_col2:
 
-    st.subheader(
-        "7. Detail Prediksi Model"
+    st.markdown(
+        "### Informasi Preprocessing"
     )
 
-    result_columns = st.columns(3)
-
-    for column, result in zip(
-        result_columns,
-        results,
-    ):
-
-        with column:
-
-            st.markdown(
-                f"### {result['Model']}"
-            )
-
-            st.metric(
-                "Prediksi",
-                result["Prediksi"],
-            )
-
-            st.metric(
-                "Confidence",
-                f"{result['Confidence'] * 100:.2f}%",
-            )
-
-
-    # ========================================================
-    # AGREEMENT CHECK
-    # ========================================================
-
-    st.subheader(
-        "8. Konsistensi Prediksi"
+    st.write(
+        "**Color:** RGB"
     )
 
-    predicted_classes = [
-        result["Prediksi"]
-        for result in results
-    ]
+    st.write(
+        "**Ukuran input:** "
+        "224 × 224 × 3"
+    )
 
-    if len(set(predicted_classes)) == 1:
+    st.write(
+        "**Normalisasi:** 0–1"
+    )
 
-        agreed_class = predicted_classes[0]
+    st.write(
+        "**Batch shape:** "
+        f"{image_batch.shape}"
+    )
 
-        st.success(
-            "Ketiga model memberikan "
-            f"prediksi yang sama: **{agreed_class}**"
+
+# ============================================================
+# PREDICTION
+# ============================================================
+
+st.subheader(
+    "6. Prediction Engine"
+)
+
+with st.spinner(
+    "Melakukan prediksi dengan "
+    "3 final model..."
+):
+
+    prediction_results = (
+        predict_models(
+            models,
+            image_batch,
         )
+    )
 
-    else:
 
-        st.warning(
-            "Prediksi ketiga model tidak sepenuhnya sama."
+# ============================================================
+# PREDICTION TABLE
+# ============================================================
+
+result_rows = []
+
+for (
+    model_name,
+    result
+) in prediction_results.items():
+
+    result_rows.append(
+        {
+            "Model":
+                model_name,
+
+            "Prediksi":
+                result["prediction"],
+
+            "Confidence":
+                f"{result['confidence'] * 100:.2f}%",
+
+            "Accuracy":
+                (
+                    f"{result['accuracy'] * 100:.2f}%"
+                    if result["accuracy"] is not None
+                    and result["accuracy"] <= 1
+                    else (
+                        f"{result['accuracy']:.2f}%"
+                        if result["accuracy"] is not None
+                        else "N/A"
+                    )
+                ),
+
+            "Inference Time (ms)":
+                f"{result['inference_time_ms']:.2f}",
+
+            "Model Size (MB)":
+                f"{result['model_size_mb']:.2f}",
+        }
+    )
+
+
+st.dataframe(
+    result_rows,
+    width="stretch",
+    hide_index=True,
+)
+
+
+# ============================================================
+# DETAIL PREDICTION
+# ============================================================
+
+st.subheader(
+    "7. Detail Prediksi Model"
+)
+
+detail_cols = st.columns(3)
+
+
+for (
+    col,
+    (model_name, result),
+) in zip(
+    detail_cols,
+    prediction_results.items(),
+):
+
+    with col:
+
+        st.markdown(
+            f"### {model_name}"
         )
 
         st.write(
-            "Hasil:",
-            ", ".join(predicted_classes),
+            "**Prediksi**"
+        )
+
+        st.markdown(
+            f"## {result['prediction']}"
+        )
+
+        st.write(
+            "**Confidence**"
+        )
+
+        st.markdown(
+            f"## {result['confidence'] * 100:.2f}%"
+        )
+
+        st.write(
+            "**Accuracy Model**"
+        )
+
+        if result["accuracy"] is not None:
+            accuracy_display = (
+                result["accuracy"] * 100
+                if result["accuracy"] <= 1
+                else result["accuracy"]
+            )
+
+            st.write(
+                f"{accuracy_display:.2f}%"
+            )
+        else:
+            st.write("N/A")
+
+        st.write(
+            "**Inference Time**"
+        )
+
+        st.write(
+            f"{result['inference_time_ms']:.2f} ms"
+        )
+
+        st.write(
+            "**Model Size**"
+        )
+
+        st.write(
+            f"{result['model_size_mb']:.2f} MB"
         )
 
 
-    # ========================================================
-    # STAGE 2 FINAL CHECK
-    # ========================================================
+# ============================================================
+# CONSISTENCY CHECK
+# ============================================================
 
-    st.divider()
+predicted_classes = [
+    result["prediction"]
+    for result
+    in prediction_results.values()
+]
 
-    st.subheader(
-        "9. Stage 2 Final Check"
-    )
+
+st.subheader(
+    "8. Konsistensi Prediksi"
+)
+
+
+if len(
+    set(predicted_classes)
+) == 1:
 
     st.success(
-        "STREAMLIT STAGE 2 PASS — "
-        "Citra berhasil diproses dan "
-        "diprediksi oleh 3 final model."
+        "Ketiga model memberikan "
+        "prediksi yang sama: "
+        f"{predicted_classes[0]}"
     )
 
 else:
 
-    st.divider()
+    st.warning(
+        "Ketiga model memberikan "
+        "hasil prediksi yang berbeda."
+    )
 
-    st.info(
-        "Silakan upload satu citra untuk "
-        "memulai prediction engine."
+
+# ============================================================
+# GRAD-CAM
+# ============================================================
+
+st.divider()
+
+st.subheader(
+    "9. Explainable AI — Grad-CAM"
+)
+
+st.write(
+    "Grad-CAM digunakan untuk menunjukkan "
+    "area citra yang paling berkontribusi "
+    "terhadap keputusan model."
+)
+
+
+gradcam_results = {}
+
+
+for (
+    model_name,
+    result,
+) in prediction_results.items():
+
+    with st.expander(
+        f"🔍 Grad-CAM — {model_name}",
+        expanded=True,
+    ):
+
+        try:
+
+            heatmap, layer_name = (
+                make_gradcam_heatmap(
+                    image_batch,
+                    models[model_name],
+                    result["class_index"],
+                )
+            )
+
+
+            overlay = (
+                create_gradcam_overlay(
+                    original_image,
+                    heatmap,
+                )
+            )
+
+
+            gradcam_results[
+                model_name
+            ] = overlay
+
+
+            st.write(
+                f"**Target class:** "
+                f"{result['prediction']}"
+            )
+
+            expected_layer = GRADCAM_TARGET_LAYERS.get(
+                model_name
+            )
+
+            st.write(
+                f"**Target layer:** "
+                f"`{layer_name}`"
+            )
+
+            if expected_layer:
+                if layer_name == expected_layer:
+                    st.caption(
+                        "Target layer sesuai "
+                        "hasil audit Notebook 08."
+                    )
+                else:
+                    st.warning(
+                        "Target layer berbeda dari "
+                        f"layer audit: `{expected_layer}`."
+                    )
+
+
+            grad_col1, grad_col2 = (
+                st.columns(2)
+            )
+
+
+            with grad_col1:
+
+                st.image(
+                    original_image,
+                    caption=(
+                        "Citra Original"
+                    ),
+                    width="stretch",
+                )
+
+
+            with grad_col2:
+
+                st.image(
+                    overlay,
+                    caption=(
+                        "Grad-CAM Overlay"
+                    ),
+                    width="stretch",
+                )
+
+
+            st.success(
+                "Grad-CAM berhasil dibuat."
+            )
+
+
+        except Exception as error:
+
+            st.error(
+                f"Grad-CAM gagal untuk "
+                f"{model_name}: {error}"
+            )
+
+
+# ============================================================
+# FINAL CHECK
+# ============================================================
+
+st.divider()
+
+st.subheader(
+    "10. Stage 3 Final Check"
+)
+
+st.write(
+    "Komponen:"
+)
+
+final_metric_rows = []
+
+for model_name, result in prediction_results.items():
+
+    final_metric_rows.append(
+        {
+            "Model": model_name,
+            "Accuracy":
+                (
+                    f"{result['accuracy'] * 100:.2f}%"
+                    if result["accuracy"] is not None
+                    and result["accuracy"] <= 1
+                    else (
+                        f"{result['accuracy']:.2f}%"
+                        if result["accuracy"] is not None
+                        else "N/A"
+                    )
+                ),
+            "Inference Time (ms)":
+                f"{result['inference_time_ms']:.2f}",
+            "Model Size (MB)":
+                f"{result['model_size_mb']:.2f}",
+            "Grad-CAM":
+                (
+                    "PASS"
+                    if model_name in gradcam_results
+                    else "FAIL"
+                ),
+        }
+    )
+
+st.dataframe(
+    final_metric_rows,
+    width="stretch",
+    hide_index=True,
+)
+
+
+successful_gradcam = len(
+    gradcam_results
+)
+
+
+if (
+    len(prediction_results) == 3
+    and successful_gradcam == 3
+):
+
+    st.success(
+        "STREAMLIT STAGE 3 PASS — "
+        "Citra berhasil diproses, "
+        "ketiga model berhasil melakukan "
+        "prediksi, dan Grad-CAM berhasil "
+        "dibuat untuk ketiga model."
+    )
+
+elif (
+    len(prediction_results) == 3
+):
+
+    st.warning(
+        "Prediction Engine PASS, "
+        "tetapi Grad-CAM belum berhasil "
+        "pada semua model."
+    )
+
+else:
+
+    st.error(
+        "STREAMLIT STAGE 3 FAIL."
     )
