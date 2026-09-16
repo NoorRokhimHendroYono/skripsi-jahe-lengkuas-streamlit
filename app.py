@@ -68,6 +68,7 @@ MODEL_PATHS = {
 # CSV hasil evaluasi dapat ditempatkan di folder berikut agar
 # accuracy final ikut tampil di Streamlit.
 METRICS_DIR_CANDIDATES = [
+    ROOT_DIR,
     ROOT_DIR / "Results" / "Model_Evaluation",
     ROOT_DIR / "results" / "Model_Evaluation",
     ROOT_DIR / "Model_Evaluation",
@@ -182,6 +183,7 @@ def load_accuracy_metrics():
 
             if normalized in {
                 "accuracy",
+                "accuracy (%)",
                 "val_accuracy",
                 "test_accuracy",
                 "mean_accuracy",
@@ -507,22 +509,41 @@ def predict_models(
 
 
 # ============================================================
-# FIND LAST CONVOLUTIONAL LAYER
+# FIND GRAD-CAM TARGET LAYER
 # ============================================================
+
+def find_target_layer(model, target_name):
+    """
+    Mencari target layer secara rekursif.
+    Mengembalikan:
+        (container_model, target_layer)
+    """
+    try:
+        return model, model.get_layer(target_name)
+    except Exception:
+        pass
+
+    for layer in model.layers:
+        if isinstance(layer, tf.keras.Model):
+            try:
+                target_layer = layer.get_layer(target_name)
+                return layer, target_layer
+            except Exception:
+                continue
+
+    return None, None
+
 
 def find_last_conv_layer(model):
 
     # First try direct layers
     for layer in reversed(model.layers):
-
         try:
-
             output_shape = layer.output.shape
 
             if (
                 len(output_shape) == 4
-                and
-                isinstance(
+                and isinstance(
                     layer,
                     (
                         tf.keras.layers.Conv2D,
@@ -531,38 +552,108 @@ def find_last_conv_layer(model):
                     ),
                 )
             ):
-
                 return layer
 
         except Exception:
             continue
 
-
     # Search nested models
     for layer in reversed(model.layers):
-
-        if isinstance(
-            layer,
-            tf.keras.Model,
-        ):
-
+        if isinstance(layer, tf.keras.Model):
             try:
-
-                nested_layer = (
-                    find_last_conv_layer(
-                        layer
-                    )
-                )
-
+                nested_layer = find_last_conv_layer(layer)
                 if nested_layer is not None:
-
                     return nested_layer
-
             except Exception:
                 pass
 
-
     return None
+
+
+# ============================================================
+# BUILD GRAD-CAM MODEL
+# ============================================================
+
+def build_gradcam_model(model, target_layer_name):
+    """
+    Membangun model Grad-CAM dengan feature map dan prediction
+    yang berasal dari graph forward-pass yang sama.
+
+    Untuk Baseline CNN, target layer berada langsung pada model.
+
+    Untuk MobileNetV2/EfficientNetB0, target layer berada di dalam
+    nested backbone. Head model kemudian direplay dari output
+    backbone sehingga gradient tetap terhubung.
+    """
+
+    container_model, target_layer = find_target_layer(
+        model,
+        target_layer_name,
+    )
+
+    if target_layer is None:
+        raise ValueError(
+            f"Target layer `{target_layer_name}` tidak ditemukan."
+        )
+
+    # --------------------------------------------------------
+    # TARGET LAYER LANGSUNG PADA MODEL UTAMA
+    # --------------------------------------------------------
+    if container_model is model:
+        try:
+            grad_model = tf.keras.models.Model(
+                inputs=model.inputs,
+                outputs=[
+                    target_layer.output,
+                    model.output,
+                ],
+                name=f"gradcam_{model.name}",
+            )
+
+            return grad_model, target_layer.name
+
+        except Exception as error:
+            raise ValueError(
+                "Target layer ditemukan pada model utama, "
+                "tetapi Grad-CAM model gagal dibangun."
+            ) from error
+
+    # --------------------------------------------------------
+    # TARGET LAYER BERADA DI DALAM NESTED BACKBONE
+    # --------------------------------------------------------
+    try:
+        backbone = container_model
+
+        backbone_index = model.layers.index(
+            backbone
+        )
+
+        # Pastikan backbone memiliki input/output yang valid.
+        backbone_input = backbone.input
+        x = backbone.output
+
+        # Replay seluruh classification head setelah backbone.
+        for head_layer in model.layers[
+            backbone_index + 1:
+        ]:
+            x = head_layer(x)
+
+        grad_model = tf.keras.models.Model(
+            inputs=backbone_input,
+            outputs=[
+                target_layer.output,
+                x,
+            ],
+            name=f"gradcam_{model.name}",
+        )
+
+        return grad_model, target_layer.name
+
+    except Exception as error:
+        raise ValueError(
+            "Target layer berada pada nested backbone, "
+            "tetapi graph Grad-CAM gagal dibangun."
+        ) from error
 
 
 # ============================================================
@@ -572,117 +663,98 @@ def find_last_conv_layer(model):
 def make_gradcam_heatmap(
     image_batch,
     model,
+    model_name,
     predicted_index,
 ):
+    """
+    Grad-CAM menggunakan target layer yang dikunci berdasarkan
+    hasil audit Notebook 08_GradCAM_Audit.
+    """
 
-    expected_layer_name = GRADCAM_TARGET_LAYERS.get(
-        next(
-            (
-                name
-                for name, path in MODEL_PATHS.items()
-                if models.get(name) is model
-            ),
-            None,
+    expected_layer_name = (
+        GRADCAM_TARGET_LAYERS.get(
+            model_name
         )
     )
 
-    last_conv_layer = None
-
-    # Gunakan target layer yang sudah dikunci pada
-    # Notebook 08_GradCAM_Audit.
-    if expected_layer_name:
-        try:
-            last_conv_layer = model.get_layer(
-                expected_layer_name
-            )
-        except Exception:
-            last_conv_layer = None
-
-    # Fallback ke pencarian layer lama jika target
-    # terkunci tidak ditemukan pada file model.
-    if last_conv_layer is None:
-        last_conv_layer = (
-            find_last_conv_layer(
-                model
-            )
-        )
-
-    if last_conv_layer is None:
-
+    if expected_layer_name is None:
         raise ValueError(
-            "Layer convolutional terakhir "
-            "tidak ditemukan pada model."
+            f"Konfigurasi target layer tidak tersedia "
+            f"untuk model `{model_name}`."
         )
 
+    grad_model, layer_name = build_gradcam_model(
+        model,
+        expected_layer_name,
+    )
 
-    try:
-
-        grad_model = tf.keras.models.Model(
-            inputs=model.inputs,
-            outputs=[
-                last_conv_layer.output,
-                model.output,
-            ],
-        )
-
-    except Exception as error:
-
-        raise ValueError(
-            "Grad-CAM tidak dapat membangun "
-            "activation model dari layer "
-            "konvolusi terakhir."
-        ) from error
-
-
+    # --------------------------------------------------------
+    # FORWARD PASS
+    # --------------------------------------------------------
     with tf.GradientTape() as tape:
 
         conv_outputs, predictions = (
-            grad_model(image_batch)
+            grad_model(
+                image_batch,
+                training=False,
+            )
         )
 
         class_channel = predictions[
             :, predicted_index
         ]
 
-
+    # --------------------------------------------------------
+    # GRADIENT
+    # --------------------------------------------------------
     gradients = tape.gradient(
         class_channel,
         conv_outputs,
     )
 
     if gradients is None:
-
         raise ValueError(
-            "Gradient tidak tersedia "
-            "untuk Grad-CAM."
+            f"Gradient tidak tersedia untuk "
+            f"model `{model_name}` pada layer "
+            f"`{layer_name}`."
         )
 
-
+    # --------------------------------------------------------
+    # GLOBAL AVERAGE POOLING GRADIENT
+    # --------------------------------------------------------
     pooled_gradients = tf.reduce_mean(
         gradients,
-        axis=(0, 1, 2),
+        axis=(1, 2),
     )
 
-
+    # --------------------------------------------------------
+    # AMBIL FEATURE MAP PERTAMA
+    # --------------------------------------------------------
     conv_outputs = conv_outputs[0]
+    pooled_gradients = pooled_gradients[0]
 
+    # --------------------------------------------------------
+    # WEIGHTED COMBINATION
+    # --------------------------------------------------------
     heatmap = tf.reduce_sum(
-        conv_outputs
-        * pooled_gradients,
+        conv_outputs * pooled_gradients,
         axis=-1,
     )
 
-
+    # --------------------------------------------------------
+    # ReLU
+    # --------------------------------------------------------
     heatmap = tf.maximum(
         heatmap,
         0,
     )
 
-
+    # --------------------------------------------------------
+    # NORMALISASI 0–1
+    # --------------------------------------------------------
     max_value = tf.reduce_max(
         heatmap
     )
-
 
     heatmap = tf.where(
         max_value > 0,
@@ -690,10 +762,9 @@ def make_gradcam_heatmap(
         tf.zeros_like(heatmap),
     )
 
-
     return (
         heatmap.numpy(),
-        last_conv_layer.name,
+        layer_name,
     )
 
 
@@ -1125,6 +1196,7 @@ for (
                 make_gradcam_heatmap(
                     image_batch,
                     models[model_name],
+                    model_name,
                     result["class_index"],
                 )
             )
