@@ -409,23 +409,48 @@ def preprocess_image(image):
     resized = cv2.resize(
         image_array,
         IMAGE_SIZE,
-        interpolation=cv2.INTER_AREA,
+        interpolation=cv2.INTER_AREA
     )
 
-    normalized = (
-        resized.astype(np.float32) / 255.0
-    )
+    processed = resized.astype(np.float32)
 
     batch = np.expand_dims(
-        normalized,
-        axis=0,
+        processed,
+        axis=0
     )
 
     return (
         image_array,
         resized,
-        batch,
+        batch
     )
+
+# def preprocess_image(image):
+
+#     image = image.convert("RGB")
+
+#     image_array = np.array(image)
+
+#     resized = cv2.resize(
+#         image_array,
+#         IMAGE_SIZE,
+#         interpolation=cv2.INTER_AREA,
+#     )
+
+#     normalized = (
+#         resized.astype(np.float32) / 255.0
+#     )
+
+#     batch = np.expand_dims(
+#         normalized,
+#         axis=0,
+#     )
+
+#     return (
+#         image_array,
+#         resized,
+#         batch,
+#     )
 
 
 # ============================================================
