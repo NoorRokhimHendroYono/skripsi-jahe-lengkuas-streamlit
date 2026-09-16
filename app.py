@@ -1102,12 +1102,16 @@ with input_col2:
     )
 
     st.write(
-        "**Ukuran input:** "
+        "**Input Size:** "
         "224 × 224 × 3"
     )
 
     st.write(
-        "**Normalisasi:** 0–1"
+        "Normalisasi: Tidak dilakukan"
+    )
+
+    st.write(
+        "**Pixel Scale:** 0–255"
     )
 
     st.write(
