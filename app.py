@@ -577,13 +577,12 @@ def find_last_conv_layer(model):
 def build_gradcam_model(model, target_layer_name):
     """
     Membangun model Grad-CAM dengan feature map dan prediction
-    yang berasal dari graph forward-pass yang sama.
+    dari forward-pass yang sama.
 
-    Untuk Baseline CNN, target layer berada langsung pada model.
-
-    Untuk MobileNetV2/EfficientNetB0, target layer berada di dalam
-    nested backbone. Head model kemudian direplay dari output
-    backbone sehingga gradient tetap terhubung.
+    Mendukung:
+    - Baseline CNN dengan target layer langsung pada model.
+    - MobileNetV2 / EfficientNetB0 dengan target layer
+      berada di dalam nested backbone.
     """
 
     container_model, target_layer = find_target_layer(
@@ -596,47 +595,73 @@ def build_gradcam_model(model, target_layer_name):
             f"Target layer `{target_layer_name}` tidak ditemukan."
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TARGET LAYER LANGSUNG PADA MODEL UTAMA
-    # --------------------------------------------------------
+    # ========================================================
     if container_model is model:
+
         try:
+            target_index = model.layers.index(
+                target_layer
+            )
+
+            # Mulai dari output target layer.
+            x = target_layer.output
+
+            # Replay semua layer setelah target layer.
+            for head_layer in model.layers[
+                target_index + 1:
+            ]:
+                x = head_layer(
+                    x,
+                    training=False
+                )
+
             grad_model = tf.keras.models.Model(
                 inputs=model.inputs,
                 outputs=[
                     target_layer.output,
-                    model.output,
+                    x,
                 ],
                 name=f"gradcam_{model.name}",
             )
 
-            return grad_model, target_layer.name
+            return (
+                grad_model,
+                target_layer.name,
+            )
 
         except Exception as error:
+
             raise ValueError(
-                "Target layer ditemukan pada model utama, "
-                "tetapi Grad-CAM model gagal dibangun."
+                "Grad-CAM Baseline CNN gagal dibangun "
+                "dari target layer "
+                f"`{target_layer_name}`: {error}"
             ) from error
 
-    # --------------------------------------------------------
-    # TARGET LAYER BERADA DI DALAM NESTED BACKBONE
-    # --------------------------------------------------------
+    # ========================================================
+    # TARGET LAYER DI DALAM NESTED BACKBONE
+    # ========================================================
     try:
+
         backbone = container_model
 
         backbone_index = model.layers.index(
             backbone
         )
 
-        # Pastikan backbone memiliki input/output yang valid.
         backbone_input = backbone.input
+
         x = backbone.output
 
-        # Replay seluruh classification head setelah backbone.
+        # Replay classification head setelah backbone.
         for head_layer in model.layers[
             backbone_index + 1:
         ]:
-            x = head_layer(x)
+            x = head_layer(
+                x,
+                training=False
+            )
 
         grad_model = tf.keras.models.Model(
             inputs=backbone_input,
@@ -647,13 +672,99 @@ def build_gradcam_model(model, target_layer_name):
             name=f"gradcam_{model.name}",
         )
 
-        return grad_model, target_layer.name
+        return (
+            grad_model,
+            target_layer.name,
+        )
 
     except Exception as error:
+
         raise ValueError(
             "Target layer berada pada nested backbone, "
-            "tetapi graph Grad-CAM gagal dibangun."
+            "tetapi graph Grad-CAM gagal dibangun: "
+            f"{error}"
         ) from error
+
+# def build_gradcam_model(model, target_layer_name):
+#     """
+#     Membangun model Grad-CAM dengan feature map dan prediction
+#     yang berasal dari graph forward-pass yang sama.
+
+#     Untuk Baseline CNN, target layer berada langsung pada model.
+
+#     Untuk MobileNetV2/EfficientNetB0, target layer berada di dalam
+#     nested backbone. Head model kemudian direplay dari output
+#     backbone sehingga gradient tetap terhubung.
+#     """
+
+#     container_model, target_layer = find_target_layer(
+#         model,
+#         target_layer_name,
+#     )
+
+#     if target_layer is None:
+#         raise ValueError(
+#             f"Target layer `{target_layer_name}` tidak ditemukan."
+#         )
+
+#     # --------------------------------------------------------
+#     # TARGET LAYER LANGSUNG PADA MODEL UTAMA
+#     # --------------------------------------------------------
+#     if container_model is model:
+#         try:
+#             grad_model = tf.keras.models.Model(
+#                 inputs=model.inputs,
+#                 outputs=[
+#                     target_layer.output,
+#                     model.output,
+#                 ],
+#                 name=f"gradcam_{model.name}",
+#             )
+
+#             return grad_model, target_layer.name
+
+#         except Exception as error:
+#             raise ValueError(
+#                 "Target layer ditemukan pada model utama, "
+#                 "tetapi Grad-CAM model gagal dibangun."
+#             ) from error
+
+#     # --------------------------------------------------------
+#     # TARGET LAYER BERADA DI DALAM NESTED BACKBONE
+#     # --------------------------------------------------------
+#     try:
+#         backbone = container_model
+
+#         backbone_index = model.layers.index(
+#             backbone
+#         )
+
+#         # Pastikan backbone memiliki input/output yang valid.
+#         backbone_input = backbone.input
+#         x = backbone.output
+
+#         # Replay seluruh classification head setelah backbone.
+#         for head_layer in model.layers[
+#             backbone_index + 1:
+#         ]:
+#             x = head_layer(x)
+
+#         grad_model = tf.keras.models.Model(
+#             inputs=backbone_input,
+#             outputs=[
+#                 target_layer.output,
+#                 x,
+#             ],
+#             name=f"gradcam_{model.name}",
+#         )
+
+#         return grad_model, target_layer.name
+
+#     except Exception as error:
+#         raise ValueError(
+#             "Target layer berada pada nested backbone, "
+#             "tetapi graph Grad-CAM gagal dibangun."
+#         ) from error
 
 
 # ============================================================
