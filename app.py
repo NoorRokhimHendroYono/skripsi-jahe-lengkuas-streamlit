@@ -1131,7 +1131,9 @@ with input_col1:
 
     image_buffer = io.BytesIO()
 
-    original_image.save(
+    Image.fromarray(
+        original_image
+    ).save(
         image_buffer,
         format="JPEG"
     )
