@@ -1228,6 +1228,15 @@ st.dataframe(
     hide_index=True,
 )
 
+
+# ============================================================
+# DETAIL PREDICTION
+# ============================================================
+
+st.subheader(
+    "7. Detail Prediksi Model"
+)
+
 # ============================================================
 # LOTTIE LOADING # <--- TAMBAHAN UNTUK LOTTIE
 # ============================================================
@@ -1245,17 +1254,12 @@ with loading_container.container():
         )
 
     st.info(
-        "Citra sedang dianalisis dan"
-        "sedang dianalisis dan dipersiapkan untuk klasifikasi..."
+        "Menyiapkan detail hasil prediksi"
+        "dari ketiga model..."
     )
+    time.sleep(2.5)
 
-# ============================================================
-# DETAIL PREDICTION
-# ============================================================
-
-st.subheader(
-    "7. Detail Prediksi Model"
-)
+    loading_container.empty()
 
 detail_cols = st.columns(3)
 
