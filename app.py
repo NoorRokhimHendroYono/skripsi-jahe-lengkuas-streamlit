@@ -1,6 +1,8 @@
 import os
 import time
 import json # <--- TAMBAHAN UNTUK LOTTIE
+import base64 # <--- Tambahan untuk animasi Scanning gambar
+import io # <--- Tambahan untuk animasi Scanning gambar
 from pathlib import Path
 
 import numpy as np
@@ -1123,10 +1125,99 @@ with input_col1:
         "### Citra Input"
     )
 
-    st.image(
-        original_image,
-        width="stretch",
+    # st.image(
+    #     original_image,
+    #     width="stretch",
+    # )
+
+    # --------------------------------------------------------
+    # RESPONSIVE SCANNING EFFECT
+    # --------------------------------------------------------
+
+    image_buffer = io.BytesIO()
+
+    original_image.save(
+        image_buffer,
+        format="JPEG"
     )
+
+    image_base64 = base64.b64encode(
+        image_buffer.getvalue()
+    ).decode()
+
+    scanner_html = f"""
+    <style>
+
+    .scanner-container {{
+        width: 100%;
+        position: relative;
+        overflow: hidden;
+        border-radius: 8px;
+        line-height: 0;
+    }}
+
+    .scanner-container img {{
+        display: block;
+        width: 100%;
+        height: auto;
+    }}
+
+    .scanner-line {{
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 3px;
+
+        background: rgba(80, 180, 255, 0.95);
+
+        box-shadow:
+            0 0 8px rgba(80, 180, 255, 0.9),
+            0 0 18px rgba(80, 180, 255, 0.7);
+
+        animation:
+            scanner-move 5s linear forwards;
+    }}
+
+    @keyframes scanner-move {{
+
+        0% {{
+            top: 0%;
+            opacity: 0;
+        }}
+
+        5% {{
+            opacity: 1;
+        }}
+
+        95% {{
+            opacity: 1;
+        }}
+
+        100% {{
+            top: 100%;
+            opacity: 0;
+        }}
+    }}
+
+    </style>
+
+    <div class="scanner-container">
+
+        <img
+            src="data:image/jpeg;base64,{image_base64}"
+        />
+
+        <div class="scanner-line"></div>
+
+    </div>
+    """
+
+    st.markdown(
+        scanner_html,
+        unsafe_allow_html=True,
+    )
+
 
 
 with input_col2:
