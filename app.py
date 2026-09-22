@@ -1125,11 +1125,6 @@ with input_col1:
         "### Citra Input"
     )
 
-    # st.image(
-    #     original_image,
-    #     width="stretch",
-    # )
-
     # --------------------------------------------------------
     # RESPONSIVE SCANNING EFFECT
     # --------------------------------------------------------
@@ -1217,7 +1212,6 @@ with input_col1:
         scanner_html,
         unsafe_allow_html=True,
     )
-
 
 
 with input_col2:
