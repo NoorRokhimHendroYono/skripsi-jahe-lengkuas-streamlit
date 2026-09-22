@@ -1071,27 +1071,6 @@ if image_source is None:
 
     st.stop()
 
-# ============================================================
-# LOTTIE LOADING # <--- TAMBAHAN UNTUK LOTTIE
-# ============================================================
-
-loading_container = st.empty()
-
-with loading_container.container():
-
-    if lottie_sparkles:
-
-        st_lottie(
-            lottie_sparkles,
-            height=180,
-            key="sparkles_loader"
-        )
-
-    st.info(
-        "Citra sedang dianalisis oleh "
-        "sistem AI..."
-    )
-
 
 # ============================================================
 # READ IMAGE
@@ -1249,6 +1228,26 @@ st.dataframe(
     hide_index=True,
 )
 
+# ============================================================
+# LOTTIE LOADING # <--- TAMBAHAN UNTUK LOTTIE
+# ============================================================
+
+loading_container = st.empty()
+
+with loading_container.container():
+
+    if lottie_sparkles:
+
+        st_lottie(
+            lottie_sparkles,
+            height=180,
+            key="sparkles_loader"
+        )
+
+    st.info(
+        "Citra sedang dianalisis dan"
+        "sedang dianalisis dan dipersiapkan untuk klasifikasi..."
+    )
 
 # ============================================================
 # DETAIL PREDICTION
