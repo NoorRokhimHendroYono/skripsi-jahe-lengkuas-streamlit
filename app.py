@@ -1210,9 +1210,8 @@ with input_col1:
     </div>
     """
 
-    st.markdown(
-        scanner_html,
-        unsafe_allow_html=True,
+    st.html(
+        scanner_html
     )
 
 
