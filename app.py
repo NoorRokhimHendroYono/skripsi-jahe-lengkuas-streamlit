@@ -1,5 +1,6 @@
 import os
 import time
+import json # <--- TAMBAHAN UNTUK LOTTIE
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,7 @@ import tensorflow as tf
 import cv2
 import pandas as pd
 from PIL import Image
+from streamlit_lottie import st_lottie # <--- TAMBAHAN UNTUK LOTTIE
 
 
 # ============================================================
@@ -60,6 +62,42 @@ MODEL_PATHS = {
         MODEL_DIR / "efficientnetb0_final.keras",
 }
 
+# ============================================================
+# PATH FOR LOTTIE ANIMATION # <--- TAMBAHAN UNTUK LOTTIE
+# ============================================================
+
+ROOT_DIR = Path(__file__).resolve().parent
+
+MODEL_DIR = ROOT_DIR / "models"
+
+LOTTIE_PATH = (
+    ROOT_DIR
+    / "assets"
+    / "sparkles_loop_loader_ai.json"
+)
+
+
+@st.cache_data
+def load_lottiefile(filepath):
+
+    with open(
+        filepath,
+        "r",
+        encoding="utf-8"
+    ) as f:
+
+        return json.load(f)
+
+
+try:
+
+    lottie_sparkles = load_lottiefile(
+        LOTTIE_PATH
+    )
+
+except Exception:
+
+    lottie_sparkles = None
 
 # ============================================================
 # FINAL MODEL METRICS / GRAD-CAM CONFIG
@@ -1033,6 +1071,27 @@ if image_source is None:
 
     st.stop()
 
+# ============================================================
+# LOTTIE LOADING # <--- TAMBAHAN UNTUK LOTTIE
+# ============================================================
+
+loading_container = st.empty()
+
+with loading_container.container():
+
+    if lottie_sparkles:
+
+        st_lottie(
+            lottie_sparkles,
+            height=180,
+            key="sparkles_loader"
+        )
+
+    st.info(
+        "Citra sedang dianalisis oleh "
+        "sistem AI..."
+    )
+
 
 # ============================================================
 # READ IMAGE
@@ -1421,6 +1480,11 @@ for (
                 f"{model_name}: {error}"
             )
 
+# ============================================================
+# STOP LOTTIE LOADING # <--- TAMBAHAN UNTUK LOTTIE
+# ============================================================
+
+loading_container.empty()
 
 # ============================================================
 # FINAL CHECK

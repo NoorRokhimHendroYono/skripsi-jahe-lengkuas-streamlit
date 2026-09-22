@@ -5,3 +5,4 @@ pandas
 pillow
 opencv-python-headless
 matplotlib
+streamlit-lottie
