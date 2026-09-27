@@ -1173,7 +1173,7 @@ with input_col1:
             0 0 18px rgba(80, 180, 255, 0.7);
 
         animation:
-            scanner-move 0.5s linear forwards;
+            scanner-move 1s linear forwards;
     }}
 
     @keyframes scanner-move {{
