@@ -1173,7 +1173,7 @@ with input_col1:
             0 0 18px rgba(80, 180, 255, 0.7);
 
         animation:
-            scanner-move 2s linear forwards;
+            scanner-move 1.5s linear forwards;
     }}
 
     @keyframes scanner-move {{
@@ -1343,7 +1343,7 @@ with loading_container.container():
         "Menyiapkan detail hasil prediksi"
         "dari ketiga model..."
     )
-    time.sleep(7)
+    time.sleep(4)
 
     loading_container.empty()
 
