@@ -1343,7 +1343,7 @@ with loading_container.container():
         "Menyiapkan detail hasil prediksi"
         "dari ketiga model..."
     )
-    time.sleep(15)  # Simulasi delay untuk menampilkan animasi Lottie
+    time.sleep(8)  # Simulasi delay untuk menampilkan animasi Lottie
 
     loading_container.empty()
 
